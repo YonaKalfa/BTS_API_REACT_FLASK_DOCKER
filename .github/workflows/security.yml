@@ -1,0 +1,79 @@
+name: CI - Build & Smoke Tests
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for cross builds)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Build frontend image
+        run: docker build -t frontend-ci ./frontend
+
+      - name: Run frontend (detached)
+        run: docker run --rm -d -p 5173:5173 --name frontend-ci-run frontend-ci
+
+      - name: Wait for frontend to be ready
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sS http://localhost:5173 >/dev/null 2>&1; then
+              echo "frontend up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Frontend did not start" && exit 1
+
+      - name: Smoke test frontend index
+        run: curl -fsS http://localhost:5173 || (docker logs frontend-ci-run && exit 1)
+
+  build-and-test-backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: flaskdb
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: userpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d flaskdb"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t backend-ci ./backend
+
+      - name: Run backend (detached, link to postgres service)
+        env:
+          DATABASE_URL: postgresql://user:userpassword@host.docker.internal:5432/flaskdb
+        run: |
+          docker run --rm -d -e DATABASE_URL="postgresql://user:userpassword@host.docker.internal:5432/flaskdb" -p 5000:5000 --name backend-ci-run backend-ci
+
+      - name: Wait for backend to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sS http://localhost:5000/api/hello >/dev/null 2>&1; then
+              echo "backend up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did not start" && docker logs backend-ci-run && exit 1
+
+      - name: Smoke test backend
+        run: curl -fsS http://localhost:5000/api/hello

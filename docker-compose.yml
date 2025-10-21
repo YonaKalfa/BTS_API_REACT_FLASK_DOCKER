@@ -1,9 +1,39 @@
 version: '3.8'
 
 services:
+
   backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flask_backend
+    depends_on:
+      - postgres_flask
+    environment:
+      FLASK_APP: app.py
+      FLASK_ENV: developpment
+      DATABASE_URL: "postgresql://user:userpassword@postgres_flask:5432/flaskdb"
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/app
+    command: ["sh", "-c", "flask run --host=0.0.0.0 --port=5000"]
 
   frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: react_frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: ["sh", "-c", "npm run dev -- --host 0.0.0.0 --port 5173"]
+    environment:
+      VITE_BACKEND_URL: "http://localhost:5000"
  
 
   postgres_flask:
@@ -17,7 +47,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
 
 volumes:
   postgres_data:
